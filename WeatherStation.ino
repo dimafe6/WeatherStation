@@ -6,10 +6,13 @@
 #include <DallasTemperature.h>
 #include <RtcDS3231.h>
 #include <Adafruit_ADS1015.h>
+#include <SoftwareSerial.h>
+#include <ArduinoJson.h>
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 #define ONE_WIRE_BUS 10
 #define countof(a) (sizeof(a) / sizeof(a[0]))
+#define BAUD_RATE 9600
 
 Adafruit_BME280 bme;
 BH1750 lightMeter;
@@ -18,20 +21,22 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 RtcDS3231<TwoWire> Rtc(Wire);
 Adafruit_ADS1115 ads;
+SoftwareSerial radio(13, 12, false, 256);
 
 const int analogPin = A0;
 
 void setup() {
     pinMode(analogPin, OUTPUT);
 
-    Serial.begin(9600);
+    Serial.begin(BAUD_RATE);
+    radio.begin(BAUD_RATE);
 
     initSensors();
 }
 
 void loop() {
-    printValues();
-    delay(2000);
+    sendValues();
+    delay(500);
 }
 
 void printDateTime()
@@ -100,7 +105,7 @@ void initSensors() {
     digitalWrite(analogPin, HIGH);
 }
 
-void printValues() {
+void sendValues() {
     printDateTime();
 
     float temp = bme.readTemperature();
@@ -140,4 +145,22 @@ void printValues() {
     Serial.print("Rain = ");
     Serial.println(rain);
     Serial.println("");
+
+    const size_t bufferSize = JSON_OBJECT_SIZE(7);
+    DynamicJsonBuffer jsonBuffer(bufferSize);
+
+    JsonObject& root = jsonBuffer.createObject();
+    root["time"] = Rtc.GetDateTime().Epoch32Time();
+    root["temp"] = temp;
+    root["pressure"] = pressure;
+    root["humidity"] = humidity;
+    root["light"] = lux;
+    root["watherTemp"] = tempWater;
+    root["rain"] = rain;
+
+    String json;
+
+    root.printTo(json);
+
+    radio.println(json);
 }
