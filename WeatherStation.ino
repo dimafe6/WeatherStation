@@ -121,6 +121,7 @@ void sendValues() {
     float tempWater = sensors.getTempC(insideThermometer);
 
     int16_t rain = ads.readADC_SingleEnded(0);
+    int16_t groundHum = ads.readADC_SingleEnded(1);
 
     Serial.print("Temperature = ");
     Serial.print(temp);
@@ -144,6 +145,9 @@ void sendValues() {
 
     Serial.print("Rain = ");
     Serial.println(rain);
+
+    Serial.print("Ground humidity = ");
+    Serial.println(groundHum);
     Serial.println("");
 
     const size_t bufferSize = JSON_OBJECT_SIZE(7);
@@ -157,6 +161,7 @@ void sendValues() {
     root["light"] = lux;
     root["watherTemp"] = tempWater;
     root["rain"] = rain;
+    root["groundHum"] = groundHum;
 
     String json;
 
