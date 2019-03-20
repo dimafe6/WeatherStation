@@ -22,10 +22,13 @@ DeviceAddress insideThermometer;
 RtcDS3231<TwoWire> Rtc(Wire);
 Adafruit_ADS1115 ads;
 SoftwareSerial radio(13, 12, false, 256);
-
+long prevSendDataMillis = millis();
 const int analogPin = A0;
+const size_t bufferSize = JSON_OBJECT_SIZE(7);
+DynamicJsonBuffer jsonBuffer(bufferSize);
 
-void setup() {
+void setup()
+{
     pinMode(analogPin, OUTPUT);
 
     Serial.begin(BAUD_RATE);
@@ -34,9 +37,13 @@ void setup() {
     initSensors();
 }
 
-void loop() {
-    sendValues();
-    delay(500);
+void loop()
+{
+    if (millis() - prevSendDataMillis > 2000)
+    {
+        prevSendDataMillis = millis();
+        sendValues();
+    }
 }
 
 void printDateTime()
@@ -45,22 +52,23 @@ void printDateTime()
 
     char datestring[20];
 
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%04u-%02u-%02u %02u:%02u:%02u"),
-            dt.Year(),
-            dt.Month(),
-            dt.Day(),            
-            dt.Hour(),
-            dt.Minute(),
-            dt.Second() );
+    snprintf_P(datestring,
+               countof(datestring),
+               PSTR("%04u-%02u-%02u %02u:%02u:%02u"),
+               dt.Year(),
+               dt.Month(),
+               dt.Day(),
+               dt.Hour(),
+               dt.Minute(),
+               dt.Second());
     Serial.println(datestring);
 }
 
-void initSensors() {
+void initSensors()
+{
     Rtc.Begin();
 
-    if (!Rtc.IsDateTimeValid()) 
+    if (!Rtc.IsDateTimeValid())
     {
         Serial.println("RTC lost confidence in the DateTime!");
     }
@@ -71,10 +79,31 @@ void initSensors() {
     }
 
     Rtc.Enable32kHzPin(false);
-    Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone); 
+    Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
+
+    RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+
+    if (!Rtc.IsDateTimeValid())
+    {
+        Serial.println("RTC lost confidence in the DateTime!");
+        Rtc.SetDateTime(compiled);
+    }
+
+    if (!Rtc.GetIsRunning())
+    {
+        Serial.println("RTC was not actively running, starting now");
+        Rtc.SetIsRunning(true);
+    }
+
+    RtcDateTime now = Rtc.GetDateTime();
+    if (now < compiled)
+    {
+        Serial.println("RTC is older than compile time!  (Updating DateTime)");
+        Rtc.SetDateTime(compiled);
+    }
 
     ads.setGain(GAIN_ONE);
-    ads.begin();    
+    ads.begin();
 
     // locate devices on the onowire bus
     Serial.print("Locating devices...");
@@ -83,13 +112,15 @@ void initSensors() {
     Serial.print(sensors.getDeviceCount(), DEC);
     Serial.println(" devices.");
 
-    if (!sensors.getAddress(insideThermometer, 0)) Serial.println("Unable to find address for Device 0"); 
+    if (!sensors.getAddress(insideThermometer, 0))
+        Serial.println("Unable to find address for Device 0");
 
     sensors.setResolution(insideThermometer, 9);
 
     bool status = bme.begin();
-    
-    if (!status) {
+
+    if (!status)
+    {
         Serial.println("Could not find a valid BME280 sensor, check wiring!");
     }
 
@@ -105,66 +136,28 @@ void initSensors() {
     digitalWrite(analogPin, HIGH);
 }
 
-void sendValues() {
-    printDateTime();
-
-    float temp = bme.readTemperature();
-
-    float pressure = bme.readPressure() / 100.0F;
-
-    float humidity = bme.readHumidity();
-
+void sendValues()
+{
+    int temp = bme.readTemperature();
+    int pressure = bme.readPressure() / 100.0F;
+    int humidity = bme.readHumidity();
     uint16_t lux = lightMeter.readLightLevel();
     delay(16);
-
     sensors.requestTemperatures();
-    float tempWater = sensors.getTempC(insideThermometer);
-
+    int tempWater = sensors.getTempC(insideThermometer);
     int16_t rain = ads.readADC_SingleEnded(0);
     int16_t groundHum = ads.readADC_SingleEnded(1);
 
-    Serial.print("Temperature = ");
-    Serial.print(temp);
-    Serial.println(" *C");
-
-    Serial.print("Pressure = ");
-    Serial.print(pressure);
-    Serial.println(" hPa");
-
-    Serial.print("Humidity = ");
-    Serial.print(humidity);
-    Serial.println(" %");
-
-    Serial.print("Light: ");
-    Serial.print(lux);
-    Serial.println(" lx");
-
-    Serial.print("Wather temperature = ");
-    Serial.print(tempWater);
-    Serial.println(" *C");
-
-    Serial.print("Rain = ");
-    Serial.println(rain);
-
-    Serial.print("Ground humidity = ");
-    Serial.println(groundHum);
-    Serial.println("");
-
-    const size_t bufferSize = JSON_OBJECT_SIZE(7);
-    DynamicJsonBuffer jsonBuffer(bufferSize);
-
-    JsonObject& root = jsonBuffer.createObject();
-    root["time"] = Rtc.GetDateTime().Epoch32Time();
-    root["temp"] = temp;
-    root["pressure"] = pressure;
-    root["humidity"] = humidity;
-    root["light"] = lux;
-    root["watherTemp"] = tempWater;
-    root["rain"] = rain;
-    root["groundHum"] = groundHum;
+    JsonObject &root = jsonBuffer.createObject();
+    root["t"] = temp;
+    root["p"] = pressure;
+    root["h"] = humidity;
+    root["l"] = lux;
+    root["wt"] = tempWater;
+    root["r"] = rain;
+    root["gh"] = groundHum;
 
     String json;
-
     root.printTo(json);
 
     radio.println(json);
